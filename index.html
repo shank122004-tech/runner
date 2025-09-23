@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Moon Runner - Full Game</title>
+<style>
+body { margin:0; overflow:hidden; background:#111; font-family:sans-serif; }
+canvas { display:block; touch-action:none; }
+
+#hud { position:absolute; top:50px; left:20px; color:white; font-size:20px; z-index:10; }
+#topAd { position:absolute; top:0; left:0; width:100%; height:50px; background:#222; color:#fff; display:flex; align-items:center; justify-content:center; z-index:10; font-size:20px; }
+#startOverlay, #gameOverOverlay, #videoAdOverlay {
+  position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); display:flex; flex-direction:column; align-items:center; justify-content:center; color:white; z-index:20;
+}
+#startOverlay button, #gameOverOverlay button, #videoAdOverlay button {
+  padding:15px 50px; font-size:1.5em; margin-top:20px; border:none; border-radius:50px; cursor:pointer;
+  background: linear-gradient(90deg,#ffdd00,#00ccff); color:black; transition: transform 0.2s, box-shadow 0.2s;
+}
+#startOverlay button:hover, #gameOverOverlay button:hover, #videoAdOverlay button:hover {
+  transform: scale(1.1); box-shadow: 0 10px 25px rgba(0,0,0,0.7);
+}
+video { width:80%; max-width:600px; border-radius:10px; }
+</style>
+</head>
+<body>
+<div id="topAd">Top Banner Ad</div>
+<div id="hud">Score: <span id="score">0</span></div>
+
+<!-- Start Overlay -->
+<div id="startOverlay">
+  <h1>Moon Runner</h1>
+  <p>Prepare to run and jump on the Moon!</p>
+  <button id="startBtn">Start Game</button>
+</div>
+
+<!-- Game Over Overlay -->
+<div id="gameOverOverlay" style="display:none;">
+  <h1>Game Over</h1>
+  <button id="restartBtn">Restart</button>
+  <button id="watchAdBtn">Watch Ad to Continue</button>
+</div>
+
+<!-- Video Ad Overlay -->
+<div id="videoAdOverlay" style="display:none;">
+  <h2>Watch this video ad to continue</h2>
+  <video id="adVideo" controls>
+    <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
+    Your browser does not support HTML5 video.
+  </video>
+  <button id="continueAfterAdBtn">Continue</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js"></script>
+<script>
+
+// ===== Global Flags =====
+let gameStarted=false, gameOver=false, paused=false;
+let playerDeathPosition={x:0,y:1,z:0};
+
+// ===== Scene & Camera =====
+let scene=new THREE.Scene();
+let camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,5000);
+camera.position.set(0,5,12);
+let renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
+renderer.setSize(window.innerWidth,window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// ===== Lights =====
+scene.add(new THREE.AmbientLight(0xffffff,0.3));
+let dirLight=new THREE.DirectionalLight(0xffffff,0.8);
+dirLight.position.set(50,100,50);
+scene.add(dirLight);
+
+// ===== Stars =====
+let starGeo=new THREE.BufferGeometry();
+let starPositions=new Float32Array(35000*3);
+for(let i=0;i<starPositions.length;i++) starPositions[i]=(Math.random()-0.5)*2000;
+starGeo.setAttribute('position',new THREE.BufferAttribute(starPositions,3));
+scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xffffff,size:1.5})));
+
+// ===== Sun & Planets =====
+let sun=new THREE.Mesh(new THREE.SphereGeometry(50,16,16),new THREE.MeshBasicMaterial({color:0xffdd00}));
+sun.position.set(0,300,-800);
+scene.add(sun);
+
+let planets=[];
+function createPlanet(size,color,x,y,z){
+  let p=new THREE.Mesh(new THREE.SphereGeometry(size,12,12),new THREE.MeshStandardMaterial({color}));
+  p.position.set(x,y,z);
+  scene.add(p);
+  planets.push(p);
+}
+createPlanet(40,0x8888ff,200,100,-1500);
+createPlanet(60,0xff6600,-250,50,-1800);
+createPlanet(30,0xff4444,300,150,-1200);
+createPlanet(35,0x44ff44,-350,120,-1400);
+
+// ===== Moon Surface =====
+let moonGeo=new THREE.PlaneGeometry(50,2000,20,20);
+moonGeo.rotateX(-Math.PI/2);
+for(let i=0;i<moonGeo.attributes.position.count;i++) moonGeo.attributes.position.setY(i,Math.random()*2-1);
+moonGeo.computeVertexNormals();
+let moonSurface=new THREE.Mesh(moonGeo,new THREE.MeshStandardMaterial({color:0x555555,roughness:1,flatShading:true}));
+moonSurface.position.z=-1000;
+scene.add(moonSurface);
+
+// ===== Tracks =====
+let tracks=[];
+let trackMat=new THREE.MeshStandardMaterial({color:0x8B4513, emissive:0x222222, roughness:0.8});
+for(let x of [-4,0,4]){
+  let g=new THREE.Group();
+  for(let z=0;z<1500;z+=4){
+    let plank=new THREE.Mesh(new THREE.BoxGeometry(3.5,0.2,0.5),trackMat);
+    plank.position.set(x,0.05,-z);
+    g.add(plank);
+  }
+  scene.add(g);
+  tracks.push(g);
+}
+
+// ===== Mountains =====
+let mountains=[];
+for(let i=0;i<10;i++){
+  let geo=new THREE.ConeGeometry(20+Math.random()*10,40+Math.random()*20,6);
+  let mat=new THREE.MeshStandardMaterial({color:0x444444});
+  let m=new THREE.Mesh(geo,mat);
+  m.position.set([-25,25][Math.floor(Math.random()*2)]+Math.random()*10,20,-i*150);
+  scene.add(m);
+  mountains.push(m);
+}
+
+// ===== Trees =====
+let trees=[];
+for(let i=0;i<40;i++){
+  let trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.5,2,6),new THREE.MeshStandardMaterial({color:0x8B4513}));
+  let leaves=new THREE.Mesh(new THREE.ConeGeometry(2,4,6),new THREE.MeshStandardMaterial({color:0x228B22}));
+  let tree=new THREE.Group();
+  trunk.position.y=1;
+  leaves.position.y=3;
+  tree.add(trunk); tree.add(leaves);
+  tree.position.set([-18,18][Math.floor(Math.random()*2)],0,-i*50);
+  scene.add(tree);
+  trees.push(tree);
+}
+
+// ===== Lamps =====
+let lamps=[];
+function addLamp(x,z){
+  let lamp=new THREE.Group();
+  let stand=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.2,6,12),new THREE.MeshStandardMaterial({color:0xcccccc,metalness:0.8,roughness:0.2}));
+  stand.position.y=3; lamp.add(stand);
+  let ring=new THREE.Mesh(new THREE.TorusGeometry(0.6,0.1,16,32),new THREE.MeshStandardMaterial({color:0xffee88,emissive:0xffdd88,emissiveIntensity:2}));
+  ring.rotation.x=Math.PI/2; ring.position.y=6; lamp.add(ring);
+  let glow=new THREE.PointLight(0xffee88,2.5,25,2); glow.position.y=6; lamp.add(glow);
+  lamp.position.set(x,0,z);
+  scene.add(lamp);
+  lamps.push(lamp);
+}
+for(let i=0;i<25;i++){ addLamp(-7,-i*40); addLamp(7,-i*40); }
+
+// ===== Player =====
+let player=new THREE.Group();
+let torso=new THREE.Mesh(new THREE.BoxGeometry(0.8,1.5,0.5),new THREE.MeshStandardMaterial({color:0x00ccff}));
+torso.position.y=1.5; player.add(torso);
+let head=new THREE.Mesh(new THREE.SphereGeometry(0.5,12,12),new THREE.MeshStandardMaterial({color:0xffcc99}));
+head.position.y=2.6; player.add(head);
+let leftArm=new THREE.Mesh(new THREE.BoxGeometry(0.25,1,0.25),new THREE.MeshStandardMaterial({color:0x00ccff}));
+leftArm.position.set(-0.6,1.5,0); player.add(leftArm);
+let rightArm=leftArm.clone(); rightArm.position.x=0.6; player.add(rightArm);
+let leftLeg=new THREE.Mesh(new THREE.BoxGeometry(0.35,1,0.35),new THREE.MeshStandardMaterial({color:0x3333ff}));
+leftLeg.position.set(-0.25,0.5,0); player.add(leftLeg);
+let rightLeg=leftLeg.clone(); rightLeg.position.x=0.25; player.add(rightLeg);
+scene.add(player); player.position.set(0,1,0);
+
+// ===== Obstacles =====
+let obstacles=[];
+for(let i=0;i<10;i++){
+  let o=new THREE.Mesh(new THREE.DodecahedronGeometry(Math.random()*1+1), new THREE.MeshStandardMaterial({color:0x666666}));
+  o.position.set([-4,0,4][Math.floor(Math.random()*3)],1,-500-Math.random()*800);
+  scene.add(o); obstacles.push(o);
+}
+
+// ===== Rolling Rocks =====
+let rollingRocks=[]; let maxRocks=6;
+for(let i=0;i<maxRocks;i++){ let rock=new THREE.Mesh(new THREE.SphereGeometry(1+Math.random()*0.5,12,12), new THREE.MeshStandardMaterial({color:0x888888})); rock.visible=false; scene.add(rock); rollingRocks.push(rock); }
+
+// ===== UFO Obstacles =====
+let ufoObstacles=[];
+for(let i=0;i<5;i++){
+  let ufoGeo=new THREE.CylinderGeometry(1.2,2,0.8,32);
+  let ufoMat=new THREE.MeshStandardMaterial({color:0x00ffff,emissive:0x00ffff,emissiveIntensity:1,metalness:0.8,roughness:0.3});
+  let ufo=new THREE.Mesh(ufoGeo,ufoMat);
+  let domeGeo=new THREE.SphereGeometry(0.7,16,16,0,Math.PI*2,0,Math.PI/2);
+  let domeMat=new THREE.MeshStandardMaterial({color:0x66ffff,transparent:true,opacity:0.7});
+  let dome=new THREE.Mesh(domeGeo,domeMat); dome.position.y=0.4; ufo.add(dome);
+  ufo.position.set((Math.floor(Math.random()*3)-1)*4,1.5,-Math.random()*1000);
+  scene.add(ufo); ufoObstacles.push(ufo);
+}
+
+// ===== State =====
+let lane=0, targetLane=0; let isJumping=false, jumpVel=0, gravity=-0.012;
+let speed=2.5, score=0;
+
+// ===== Controls =====
+let startX=0, startY=0;
+document.addEventListener("touchstart",e=>{startX=e.touches[0].clientX; startY=e.touches[0].clientY;});
+document.addEventListener("touchend",e=>{
+  let dx=e.changedTouches[0].clientX-startX;
+  let dy=e.changedTouches[0].clientY-startY;
+  if(Math.abs(dx)>Math.abs(dy)){
+    if(dx>50) targetLane=Math.min(1,targetLane+1);
+    if(dx<-50) targetLane=Math.max(-1,targetLane-1);
+  } else {
+    if(dy<-50 && !isJumping){ isJumping=true; jumpVel=0.3; }
+  }
+});
+document.addEventListener("keydown",e=>{
+  if(e.code==="ArrowLeft") targetLane=Math.max(-1,targetLane-1);
+  if(e.code==="ArrowRight") targetLane=Math.min(1,targetLane+1);
+  if(e.code==="Space" && !isJumping){ isJumping=true; jumpVel=0.3; }
+});
+
+// ===== Rolling Rocks Spawn =====
+let lastRockTime=0;
+function spawnRollingRock(){ if(Date.now()-lastRockTime<600) return; lastRockTime=Date.now(); let trackX=[-4,0,4][Math.floor(Math.random()*3)]; for(let r of rollingRocks){ if(!r.visible){ r.position.set(trackX,1.5,player.position.z-120); r.visible=true; break; } } }
+
+// ===== Game Over =====
+function endGame(){ 
+  gameOver=true; playerDeathPosition={x:player.position.x,y:player.position.y,z:player.position.z};
+  document.getElementById("gameOverOverlay").style.display="flex";
+}
+
+// ===== Animate =====
+function animate(){
+  if(!gameStarted) return;
+  requestAnimationFrame(animate);
+  if(gameOver || paused) return;
+
+  player.position.x += (targetLane*4 - player.position.x) * 0.25;
+  if(isJumping){ player.position.y+=jumpVel; jumpVel+=gravity; if(player.position.y<=1){player.position.y=1;isJumping=false;} }
+
+  let leanAngle=(targetLane - player.position.x/4)*0.2;
+  torso.rotation.z=leanAngle;
+  leftArm.rotation.x=Math.sin(Date.now()*0.015)*0.6;
+  rightArm.rotation.x=-Math.sin(Date.now()*0.015)*0.6;
+  leftLeg.rotation.x=-Math.sin(Date.now()*0.015)*0.6;
+  rightLeg.rotation.x=Math.sin(Date.now()*0.015)*0.6;
+
+  moonSurface.position.z+=speed; if(moonSurface.position.z>0) moonSurface.position.z=-1000;
+  tracks.forEach(t=>{ t.position.z+=speed; if(t.position.z>0) t.position.z=-1000; });
+  mountains.forEach(m=>{ m.position.z+=speed*0.4; if(m.position.z>50) m.position.z=-2000+Math.random()*500; });
+  trees.forEach(tr=>{ tr.position.z+=speed*0.6; if(tr.position.z>50) tr.position.z=-2000; });
+  lamps.forEach(l=>{ l.position.z+=speed*0.6; if(l.position.z>50) l.position.z=-2000; });
+  planets.forEach(p=>{ p.position.z+=speed*0.2; if(p.position.z>100) p.position.z=-2000; });
+
+  obstacles.forEach(o=>{
+    o.position.z+=speed*1.2;
+    if(o.position.z>10){ o.position.z=-800-Math.random()*800; o.position.x=[-4,0,4][Math.floor(Math.random()*3)]; }
+    let dx=Math.abs(player.position.x-o.position.x), dz=Math.abs(player.position.z-o.position.z);
+    if(dx<1.2 && dz<1.2 && player.position.y<1.6) endGame();
+  });
+
+  spawnRollingRock();
+  for(let r of rollingRocks){
+    if(r.visible){ r.position.z+=speed+0.7; r.rotation.y+=0.05; if(r.position.z>player.position.z+15) r.visible=false; let dx=Math.abs(player.position.x-r.position.x), dz=Math.abs(player.position.z-r.position.z); if(dx<1.5 && dz<1.5) endGame(); }
+  }
+
+  ufoObstacles.forEach(ufo=>{
+    ufo.position.z+=speed; ufo.rotation.y+=0.02; ufo.position.y=1.5+Math.sin(Date.now()*0.002)*0.2;
+    if(ufo.position.z>5){ ufo.position.z=-1000-Math.random()*500; ufo.position.x=(Math.floor(Math.random()*3)-1)*4; }
+    let dx=Math.abs(player.position.x-ufo.position.x), dz=Math.abs(player.position.z-ufo.position.z), dy=Math.abs(player.position.y-ufo.position.y);
+    if(dx<1.5 && dz<1.5 && dy<2) endGame();
+  });
+
+  camera.position.x += (player.position.x - camera.position.x) * 0.12;
+  camera.position.y += (player.position.y+5 - camera.position.y) * 0.12;
+  camera.position.z += (player.position.z+12 - camera.position.z) * 0.12;
+  camera.lookAt(player.position.x, player.position.y+1, player.position.z-5);
+
+  score++;
+  document.getElementById("score").innerText=score;
+  renderer.render(scene,camera);
+}
+
+// ===== Start Button =====
+document.getElementById("startBtn").onclick=()=>{
+  gameStarted=true; document.getElementById("startOverlay").style.display="none"; animate();
+};
+
+// ===== Restart Button =====
+document.getElementById("restartBtn").onclick=()=>{
+  location.reload();
+};
+
+// ===== Watch Ad Button =====
+document.getElementById("watchAdBtn").onclick=()=>{
+  document.getElementById("videoAdOverlay").style.display="flex";
+  document.getElementById("gameOverOverlay").style.display="none";
+  document.getElementById("adVideo").currentTime=0;
+  document.getElementById("adVideo").play();
+};
+
+// ===== Continue After Ad =====
+document.getElementById("continueAfterAdBtn").onclick=()=>{
+  document.getElementById("videoAdOverlay").style.display="none";
+  gameOver=false;
+  player.position.set(playerDeathPosition.x,playerDeathPosition.y,playerDeathPosition.z);
+  animate();
+};
+
+// ===== Resize =====
+window.addEventListener("resize", ()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+
+</script>
+</body>
+</html>
