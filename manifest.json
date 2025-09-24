@@ -1,8 +1,13 @@
 {
-  "name": "My Runner Game",
-  "short_name": "Runner",
-  "start_url": "/index.html",
+  "background_color": "#121111",
+  "dir": "ltr",
   "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#000000"
+  "name": "Moon Runner",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "shank122004-tech.github",
+  "start_url": "/",
+  "theme_color": "#2f2a2a",
+  "id": "/https://shank122004-tech.github.io/runner/",
+  "description": "Moon Runner is an exciting 3D endless runner game where you jump, dodge obstacles, and collect coins while racing through a futuristic lunar landscape. Play offline, enjoy smooth gameplay, and compete for high scores!"
 }
