@@ -1,17 +1,8 @@
 {
-  "name": "Moon Runner",
+  "name": "My Runner Game",
   "short_name": "Runner",
-  "start_url": "/runner/index.html",
-  "scope": "/runner/",
+  "start_url": "/index.html",
   "display": "standalone",
   "background_color": "#000000",
-  "theme_color": "#000000",
-  "orientation": "portrait",
-  "icons": [
-    {
-      "src": "icon.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
-  ]
+  "theme_color": "#000000"
 }
